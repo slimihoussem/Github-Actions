@@ -1,4 +1,4 @@
-name: Python CI - Generate Test Report and Commit to Repo
+name: Python CI - Generate Test Report
 
 on:
   push:
@@ -9,14 +9,12 @@ on:
       - "**"
 
 jobs:
-  test-and-commit-report:
+  test-and-upload-report:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # required for pushing back
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,19 +36,8 @@ jobs:
             --html=report.html \
             --self-contained-html
 
-      - name: Commit report.html to repository
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add report.html
-
-          if ! git diff --cached --quiet; then
-            git commit -m "CI: update test report [skip ci]"
-
-            # Pull latest changes to avoid push rejection
-            git pull --rebase origin main
-
-            git push origin main
-          else
-            echo "No changes in report.html"
+      - name: Upload test report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: report.html
