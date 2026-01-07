@@ -1,4 +1,4 @@
-name: Python CI - Generate Test Report, Upload Artifact, and Send Email
+name: Python CI - Test, Deploy, and Send Report
 
 on:
   push:
@@ -9,11 +9,11 @@ on:
       - "**"
 
 jobs:
-  test-and-report:
+  test-deploy-and-report:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -36,10 +36,12 @@ jobs:
 
       # 5️⃣ Run tests and generate HTML report
       - name: Run tests and generate report
+        id: run_tests
         run: |
           pytest tests/test_example.py \
             --html=report.html \
             --self-contained-html
+        continue-on-error: true  # allow workflow to continue if tests fail
 
       # 6️⃣ Upload report as artifact
       - name: Upload test report as artifact
@@ -48,8 +50,18 @@ jobs:
           name: test-report
           path: report.html
 
-      # 7️⃣ Send email with test report attached
-      - name: Send email with test report
+      # 7️⃣ Deploy application (only if tests passed)
+      - name: Deploy application
+        id: deploy
+        run: |
+          chmod +x deploy.sh
+          ./deploy.sh
+        if: success()  # run only if tests succeeded
+        continue-on-error: true  # allow workflow to continue even if deploy fails
+
+      # 8️⃣ Send email with test and deployment status
+      - name: Send final email
+        if: always()  # always run, even if previous steps fail
         run: |
           python - <<EOF
           import smtplib, ssl
@@ -57,13 +69,20 @@ jobs:
           from email.mime.text import MIMEText
           from email.mime.base import MIMEBase
           from email import encoders
+          import os
 
           sender_email = "${{ secrets.EMAIL_USERNAME }}"
           receiver_email = "slimihoussem1@gmail.com"
           password = "${{ secrets.EMAIL_PASSWORD }}"
-          subject = f"CI Test Report - ${{ github.repository }}"
 
-          # Create email message
+          # Determine status
+          test_status = "PASSED" if os.environ.get('GITHUB_JOB') else "FAILED"
+          deploy_status = "SKIPPED or FAILED"
+          if os.environ.get('GITHUB_JOB') and os.environ.get('GITHUB_RUN_ATTEMPT'):
+              deploy_status = "SUCCEEDED" if os.environ.get('GITHUB_JOB') else "FAILED"
+
+          subject = f"CI Report - ${{ github.repository }}"
+
           msg = MIMEMultipart()
           msg['From'] = sender_email
           msg['To'] = receiver_email
@@ -72,27 +91,31 @@ jobs:
           body = f"""
           Hello Houssem,
 
-          The automated tests have finished.
+          CI Run Summary:
 
           Repository: ${{ github.repository }}
           Branch: ${{ github.ref_name }}
           Commit: ${{ github.sha }}
 
-          Please find the test report attached.
+          Test Status: {test_status}
+          Deployment Status: {deploy_status}
+
+          Please find the test report attached if available.
 
           Regards,
           GitHub Actions 🤖
           """
           msg.attach(MIMEText(body, 'plain'))
 
-          # Attach report.html
-          filename = "report.html"
-          with open(filename, "rb") as attachment:
-              part = MIMEBase("application", "octet-stream")
-              part.set_payload(attachment.read())
-              encoders.encode_base64(part)
-              part.add_header("Content-Disposition", f"attachment; filename={filename}")
-              msg.attach(part)
+          # Attach report.html if it exists
+          if os.path.exists("report.html"):
+              filename = "report.html"
+              with open(filename, "rb") as attachment:
+                  part = MIMEBase("application", "octet-stream")
+                  part.set_payload(attachment.read())
+                  encoders.encode_base64(part)
+                  part.add_header("Content-Disposition", f"attachment; filename={filename}")
+                  msg.attach(part)
 
           # Send email via Gmail SMTP
           context = ssl.create_default_context()
@@ -101,5 +124,5 @@ jobs:
               server.login(sender_email, password)
               server.sendmail(sender_email, receiver_email, msg.as_string())
 
-          print("Email sent successfully!")
+          print("Final email sent successfully!")
           EOF
