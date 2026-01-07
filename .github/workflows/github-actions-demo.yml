@@ -1,38 +1,58 @@
-name: GitHub Actions Demo
-run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
-on: [push]
+name: Python CI with Email Report
+
+on:
+  push:
+    branches:
+      - "**"   # run on every push to any branch
+
 jobs:
-  Explore-GitHub-Actions:
+  test-and-email:
     runs-on: ubuntu-latest
+
     steps:
-      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-      - name: Check out repository code
-        uses: actions/checkout@v5
-      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
-      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-      - name: List files in the repository
-        run: |
-          ls ${{ github.workspace }}
-      - run: echo "🍏 This job's status is ${{ job.status }}."
-      - name: Send mail report
-        # This condition runs the step if any previous step in the job failed
-        if: ${{ failure() }}
-        uses: dawidd6/action-send-mail@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          # Mail server settings (using Gmail as an example, update for your provider)
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-html
+
+      - name: Run application
+        run: |
+          python app.py
+
+      - name: Run tests and generate report
+        run: |
+          pytest tests/test_example.py --html=report.html --self-contained-html
+
+      - name: Send email report
+        uses: dawidd6/action-send-mail@v3
+        with:
           server_address: smtp.gmail.com
-          server_port: 465
-          # User credentials (store these in GitHub Secrets)
+          server_port: 587
+          secure: false
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          # Email content
-          subject: Workflow ${{ github.workflow }}
+          subject: "GitHub Actions Test Report - ${{ github.repository }}"
           body: |
-            The workflow run for ${{ github.repository }} has completed with status ${{ job.status }}.
-            View details here: ${{ github.event.pull_request.html_url || github.event.compare_url }}
-            # You can attach files here
-            # attachments: test-report.txt
+            Hello,
+
+            The automated tests have completed successfully.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+
+            Please find the test report attached.
+
+            Regards,
+            GitHub Actions 🤖
           to: slimihoussem1@gmail.com
-          from: GitHub Actions <slimihoussem1@gmail.com>
+          from: GitHub Actions
+          attachments: report.html
