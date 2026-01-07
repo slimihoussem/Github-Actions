@@ -16,3 +16,23 @@ jobs:
         run: |
           ls ${{ github.workspace }}
       - run: echo "🍏 This job's status is ${{ job.status }}."
+      - name: Send mail report
+        # This condition runs the step if any previous step in the job failed
+        if: ${{ failure() }}
+        uses: dawidd6/action-send-mail@v2
+        with:
+          # Mail server settings (using Gmail as an example, update for your provider)
+          server_address: smtp.gmail.com
+          server_port: 465
+          # User credentials (store these in GitHub Secrets)
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          # Email content
+          subject: Workflow ${{ github.workflow }}
+          body: |
+            The workflow run for ${{ github.repository }} has completed with status ${{ job.status }}.
+            View details here: ${{ github.event.pull_request.html_url || github.event.compare_url }}
+            # You can attach files here
+            # attachments: test-report.txt
+          to: slimihoussem1@gmail.com
+          from: GitHub Actions <slimihoussem1@gmail.com>
