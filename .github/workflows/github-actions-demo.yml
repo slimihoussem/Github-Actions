@@ -125,51 +125,48 @@ jobs:
 
       - name: Send email
         run: |
-          python - <<EOF
-          import smtplib, ssl, os
-          from email.mime.multipart import MIMEMultipart
-          from email.mime.text import MIMEText
-          from email.mime.base import MIMEBase
-          from email import encoders
+         python - <<EOF
+         import smtplib, ssl, os
+         from email.mime.multipart import MIMEMultipart
+         from email.mime.text import MIMEText
+         from email.mime.base import MIMEBase
+         from email import encoders
 
-          sender = "${{ secrets.EMAIL_USERNAME }}"
-          password = "${{ secrets.EMAIL_PASSWORD }}"
-          receiver = "slimihoussem1@gmail.com"
+         sender = "${{ secrets.EMAIL_USERNAME }}"
+         password = "${{ secrets.EMAIL_PASSWORD }}"
+         receiver = "slimihoussem1@gmail.com"
 
-          test_status = "PASSED" if "${{ needs.test.outputs.test_result }}" == "success" else "FAILED"
-          deploy_status = "SKIPPED"
-          if os.path.exists("deploy.log"):
-              deploy_status = "DONE"
+         test_status = "PASSED" if "${{ needs.test.outputs.test_result }}" == "success" else "FAILED"
+         deploy_status = "DONE" if os.path.exists("deploy.log") else "SKIPPED"
 
-          msg = MIMEMultipart()
-          msg["From"] = sender
-          msg["To"] = receiver
-          msg["Subject"] = "CI Report – Tests & Deployment"
+         msg = MIMEMultipart()
+         msg["From"] = sender
+         msg["To"] = receiver
+         msg["Subject"] = "CI Report – Tests & Deployment"
 
-          msg.attach(MIMEText(f"""
-          CI Pipeline Finished
+         msg.attach(MIMEText(f"""
+         CI Pipeline Finished
 
-          Tests: {test_status}
-          Deployment: {deploy_status}
+         Tests: {test_status}
+         Deployment: {deploy_status}
 
-          The attached HTML contains:
-          - Pytest statistics & environment
-          - Test results
-          - Workflow logs (app, tests, deploy)
-          """, "plain"))
+         The attached HTML contains:
+         - Pytest statistics & environment
+         - Test results
+         - Workflow logs
+         """, "plain"))
 
-          with open("unified_report.html", "rb") as f:
-              part = MIMEBase("application", "octet-stream")
-              part.set_payload(f.read())
-              encoders.encode_base64(part)
-              part.add_header("Content-Disposition", "attachment; filename=report.html")
-              msg.attach(part)
+         with open("unified_report.html", "rb") as f:
+             part = MIMEBase("application", "octet-stream")
+             part.set_payload(f.read())
+             encoders.encode_base64(part)
+             part.add_header("Content-Disposition", "attachment; filename=report.html")
+             msg.attach(part)
 
-          ctx = ssl.create_default_context()
-          with smtplib.SMTP("smtp.gmail.com", 587) as s:
-              s.starttls(ctx)
-              s.login(sender, password)
-              s.send_message(msg)
+         with smtplib.SMTP("smtp.gmail.com", 587) as s:
+             s.starttls()   # ✅ FIXED HERE
+             s.login(sender, password)
+             s.send_message(msg)
 
-          print("Email sent")
-          EOF
+         print("Email sent successfully")
+         EOF
