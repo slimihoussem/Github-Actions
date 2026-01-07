@@ -1,4 +1,4 @@
-name: Python CI - Cumulative Report with Logs
+name: Python CI - Cumulative Pytest HTML Report with Logs
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - "**"
 
 jobs:
-  cumulative-report:
+  cumulative-pytest-report:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-html requests
+          pip install pytest pytest-html
 
       # 4️⃣ Download previous report artifact if exists
       - name: Download previous report artifact
@@ -35,14 +35,14 @@ jobs:
         with:
           name: full-ci-report
           path: old_report
-        continue-on-error: true  # in case this is first run
+        continue-on-error: true  # first run may not have artifact
 
       # 5️⃣ Run application and save logs
       - name: Run application
         run: |
           python app.py | tee app.log
 
-      # 6️⃣ Run tests and generate report
+      # 6️⃣ Run tests and generate new pytest-html report
       - name: Run tests and generate report
         id: run_tests
         run: |
@@ -61,36 +61,25 @@ jobs:
         if: success()
         continue-on-error: true
 
-      # 8️⃣ Merge old report and new logs
-      - name: Merge logs into cumulative report
+      # 8️⃣ Merge previous logs into new pytest-html report
+      - name: Merge previous logs
         run: |
-          # Start new report
-          echo "<html><body><h1>CI Cumulative Report</h1>" > full_report.html
-
-          # Add old report if exists
+          # Create a cumulative report by adding old logs at the bottom
+          echo '<div style="margin-top:40px;"><h2>Previous Logs</h2>' > cumulative_logs.html
           if [ -f old_report/full_report.html ]; then
-            echo "<h2>Previous Runs</h2>" >> full_report.html
-            cat old_report/full_report.html >> full_report.html
+            cat old_report/full_report.html >> cumulative_logs.html
           fi
+          echo '<h3>New Application Logs</h3><pre>' >> cumulative_logs.html
+          cat app.log >> cumulative_logs.html
+          echo '</pre><h3>New Test Logs</h3><pre>' >> cumulative_logs.html
+          cat pytest.log >> cumulative_logs.html
+          echo '</pre><h3>Deployment Logs</h3><pre>' >> cumulative_logs.html
+          if [ -f deploy.log ]; then cat deploy.log >> cumulative_logs.html; fi
+          echo '</pre></div>' >> cumulative_logs.html
 
-          # Add new application logs
-          echo "<h2>Application Logs - New Run</h2><pre>" >> full_report.html
-          cat app.log >> full_report.html
-          echo "</pre>" >> full_report.html
-
-          # Add new test logs
-          echo "<h2>Test Logs - New Run</h2><pre>" >> full_report.html
-          cat pytest.log >> full_report.html
-          echo "</pre>" >> full_report.html
-
-          # Add new deployment logs
-          echo "<h2>Deployment Logs - New Run</h2><pre>" >> full_report.html
-          if [ -f deploy.log ]; then
-            cat deploy.log >> full_report.html
-          else
-            echo "Deployment was skipped or failed." >> full_report.html
-          fi
-          echo "</pre></body></html>" >> full_report.html
+          # Inject cumulative_logs.html into pytest-html report
+          # Insert before </body> tag
+          awk 'NR==FNR{a[++n]=$0; next} /<\/body>/{for(i=1;i<=n;i++) print a[i]}1' cumulative_logs.html report.html > full_report.html
 
       # 9️⃣ Upload cumulative report as artifact
       - name: Upload cumulative report
@@ -100,7 +89,7 @@ jobs:
           path: full_report.html
 
       # 🔟 Send email with cumulative report
-      - name: Send email with cumulative report
+      - name: Send final email
         if: always()
         run: |
           python - <<EOF
@@ -130,7 +119,10 @@ jobs:
           Branch: ${{ github.ref_name }}
           Commit: ${{ github.sha }}
 
-          Please find the cumulative CI report attached.
+          The attached report contains:
+          - Test results with environment and summary (like pytest-html)
+          - Application logs (new + previous)
+          - Deployment logs
 
           Regards,
           GitHub Actions 🤖
@@ -153,5 +145,5 @@ jobs:
               server.login(sender_email, password)
               server.sendmail(sender_email, receiver_email, msg.as_string())
 
-          print("Cumulative report email sent successfully!")
+          print("Email with cumulative pytest-html report sent successfully!")
           EOF
