@@ -1,4 +1,4 @@
-name: Python CI - Test and Send Email
+name: Python CI - Test and Email Report
 
 on:
   push:
@@ -36,27 +36,57 @@ jobs:
             --html=report.html \
             --self-contained-html
 
-      - name: Send email with report
-        uses: marketplace-actions/send-mail@v1
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "CI Test Report - ${{ github.repository }}"
-          body: |
-            Hello Houssem,
+      - name: Send email with report (Python SMTP)
+        run: |
+          python - <<EOF
+          import smtplib, ssl
+          from email.mime.multipart import MIMEMultipart
+          from email.mime.text import MIMEText
+          from email.mime.base import MIMEBase
+          from email import encoders
 
-            The automated tests have finished.
+          sender_email = "${{ secrets.EMAIL_USERNAME }}"
+          receiver_email = "slimihoussem1@gmail.com"
+          password = "${{ secrets.EMAIL_PASSWORD }}"
+          subject = f"CI Test Report - ${{ github.repository }}"
 
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
+          # Create email
+          msg = MIMEMultipart()
+          msg['From'] = sender_email
+          msg['To'] = receiver_email
+          msg['Subject'] = subject
 
-            Please find the test report attached.
+          body = f"""
+          Hello Houssem,
 
-            Regards,
-            GitHub Actions 🤖
-          to: slimihoussem1@gmail.com
-          from: ${{ secrets.EMAIL_USERNAME }}
-          attachments: report.html
+          The automated tests have finished.
+
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Commit: ${{ github.sha }}
+
+          Please find the test report attached.
+
+          Regards,
+          GitHub Actions 🤖
+          """
+          msg.attach(MIMEText(body, 'plain'))
+
+          # Attach report.html
+          filename = "report.html"
+          with open(filename, "rb") as attachment:
+              part = MIMEBase("application", "octet-stream")
+              part.set_payload(attachment.read())
+              encoders.encode_base64(part)
+              part.add_header("Content-Disposition", f"attachment; filename={filename}")
+              msg.attach(part)
+
+          # Send email via Gmail SMTP
+          context = ssl.create_default_context()
+          with smtplib.SMTP("smtp.gmail.com", 587) as server:
+              server.starttls(context=context)
+              server.login(sender_email, password)
+              server.sendmail(sender_email, receiver_email, msg.as_string())
+
+          print("Email sent successfully!")
+          EOF
