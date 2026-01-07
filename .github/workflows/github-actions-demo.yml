@@ -1,4 +1,4 @@
-name: Python CI - Test and Email Report
+name: Python CI - Generate Test Report and Commit to Repo
 
 on:
   push:
@@ -9,12 +9,14 @@ on:
       - "**"
 
 jobs:
-  test-and-email-report:
+  test-and-commit-report:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for pushing back
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,57 +38,19 @@ jobs:
             --html=report.html \
             --self-contained-html
 
-      - name: Send email with report (Python SMTP)
+      - name: Commit report.html to repository
         run: |
-          python - <<EOF
-          import smtplib, ssl
-          from email.mime.multipart import MIMEMultipart
-          from email.mime.text import MIMEText
-          from email.mime.base import MIMEBase
-          from email import encoders
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          sender_email = "${{ secrets.EMAIL_USERNAME }}"
-          receiver_email = "slimihoussem1@gmail.com"
-          password = "${{ secrets.EMAIL_PASSWORD }}"
-          subject = f"CI Test Report - ${{ github.repository }}"
+          git add report.html
 
-          # Create email
-          msg = MIMEMultipart()
-          msg['From'] = sender_email
-          msg['To'] = receiver_email
-          msg['Subject'] = subject
+          if ! git diff --cached --quiet; then
+            git commit -m "CI: update test report [skip ci]"
 
-          body = f"""
-          Hello Houssem,
+            # Pull latest changes to avoid push rejection
+            git pull --rebase origin main
 
-          The automated tests have finished.
-
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-
-          Please find the test report attached.
-
-          Regards,
-          GitHub Actions 🤖
-          """
-          msg.attach(MIMEText(body, 'plain'))
-
-          # Attach report.html
-          filename = "report.html"
-          with open(filename, "rb") as attachment:
-              part = MIMEBase("application", "octet-stream")
-              part.set_payload(attachment.read())
-              encoders.encode_base64(part)
-              part.add_header("Content-Disposition", f"attachment; filename={filename}")
-              msg.attach(part)
-
-          # Send email via Gmail SMTP
-          context = ssl.create_default_context()
-          with smtplib.SMTP("smtp.gmail.com", 587) as server:
-              server.starttls(context=context)
-              server.login(sender_email, password)
-              server.sendmail(sender_email, receiver_email, msg.as_string())
-
-          print("Email sent successfully!")
-          EOF
+            git push origin main
+          else
+            echo "No changes in report.html"
