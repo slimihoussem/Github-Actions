@@ -1,40 +1,37 @@
-name: Python CI - Test, Deploy, and Cumulative Report
+name: Python CI - Test, Deploy, Unified Report
 
 on:
   push:
-    branches:
-      - "**"
+    branches: ["**"]
   pull_request:
-    branches:
-      - "**"
+    branches: ["**"]
 
 jobs:
-  # ==========================
-  # 1️⃣ Test Job
-  # ==========================
+# ==========================
+# 1️⃣ TEST JOB
+# ==========================
   test:
     runs-on: ubuntu-latest
     outputs:
-      test-result: ${{ steps.set-output.outputs.test_result }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      test_result: ${{ steps.result.outputs.test_result }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install pytest pytest-html
 
-      - name: Download previous report artifact
+      # Try to download previous report (silent if not exists)
+      - name: Download previous report
         uses: actions/download-artifact@v4
         with:
-          name: full-ci-report
-          path: old_report
+          name: unified-report
+          path: old
         continue-on-error: true
 
       - name: Run application
@@ -42,76 +39,81 @@ jobs:
           python app.py | tee app.log
 
       - name: Run tests
-        id: run_tests
         run: |
           pytest tests/test_example.py \
-            --html=report.html \
+            --html=pytest.html \
             --self-contained-html \
             --capture=tee-sys | tee pytest.log
         continue-on-error: true
 
-      - name: Merge previous logs
+      - name: Build unified report
         run: |
-          echo '<html><body><h1>CI Cumulative Report</h1>' > full_report.html
-          if [ -f old_report/full_report.html ]; then
-            echo '<h2>Previous Runs</h2>' >> full_report.html
-            cat old_report/full_report.html >> full_report.html
-          fi
-          echo '<h2>New Application Logs</h2><pre>' >> full_report.html
-          cat app.log >> full_report.html
-          echo '</pre><h2>New Test Logs</h2><pre>' >> full_report.html
-          cat pytest.log >> full_report.html
-          echo '</pre></body></html>' >> full_report.html
+          cp pytest.html unified_report.html
 
-      - name: Upload cumulative report
+          echo "<hr><h2>Workflow Logs</h2>" >> unified_report.html
+
+          if [ -f old/unified_report.html ]; then
+            echo "<details><summary><b>Previous Runs</b></summary>" >> unified_report.html
+            sed '1,/<body>/d' old/unified_report.html | sed '/<\/body>/,$d' >> unified_report.html
+            echo "</details><hr>" >> unified_report.html
+          fi
+
+          echo "<h3>Application Logs</h3><pre>" >> unified_report.html
+          cat app.log >> unified_report.html
+          echo "</pre>" >> unified_report.html
+
+          echo "<h3>Test Logs</h3><pre>" >> unified_report.html
+          cat pytest.log >> unified_report.html
+          echo "</pre>" >> unified_report.html
+
+      - name: Upload unified report
         uses: actions/upload-artifact@v4
         with:
-          name: full-ci-report
-          path: full_report.html
+          name: unified-report
+          path: unified_report.html
 
       - name: Set test result
-        id: set-output
+        id: result
         run: |
-          if grep -q "failed" pytest.log; then
-            echo "test_result=fail" >> $GITHUB_OUTPUT
-          else
-            echo "test_result=success" >> $GITHUB_OUTPUT
-          fi
+          grep -q "FAILED" pytest.log && \
+          echo "test_result=fail" >> $GITHUB_OUTPUT || \
+          echo "test_result=success" >> $GITHUB_OUTPUT
 
-  # ==========================
-  # 2️⃣ Deploy Job
-  # ==========================
+# ==========================
+# 2️⃣ DEPLOY JOB
+# ==========================
   deploy:
     runs-on: ubuntu-latest
     needs: test
-    if: ${{ needs.test.outputs.test-result == 'success' }} # deploy only if tests pass
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    if: ${{ needs.test.outputs.test_result == 'success' }}
 
-      - name: Run deployment
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy
         run: |
           chmod +x deploy.sh
           ./deploy.sh | tee deploy.log
 
-      - name: Upload deployment logs
+      - name: Upload deploy logs
         uses: actions/upload-artifact@v4
         with:
           name: deploy-log
           path: deploy.log
 
-  # ==========================
-  # 3️⃣ Email Job
-  # ==========================
+# ==========================
+# 3️⃣ EMAIL JOB (ALWAYS)
+# ==========================
   email:
     runs-on: ubuntu-latest
     needs: [test, deploy]
-    if: always()  # run email regardless of test or deploy status
+    if: always()
+
     steps:
-      - name: Download cumulative report
+      - name: Download report
         uses: actions/download-artifact@v4
         with:
-          name: full-ci-report
+          name: unified-report
           path: .
 
       - name: Download deploy log
@@ -119,81 +121,55 @@ jobs:
         with:
           name: deploy-log
           path: .
+        continue-on-error: true
 
-      - name: Send email with cumulative report
+      - name: Send email
         run: |
           python - <<EOF
-          import smtplib, ssl
+          import smtplib, ssl, os
           from email.mime.multipart import MIMEMultipart
           from email.mime.text import MIMEText
           from email.mime.base import MIMEBase
           from email import encoders
-          import os
 
-          sender_email = "${{ secrets.EMAIL_USERNAME }}"
-          receiver_email = "slimihoussem1@gmail.com"
+          sender = "${{ secrets.EMAIL_USERNAME }}"
           password = "${{ secrets.EMAIL_PASSWORD }}"
+          receiver = "slimihoussem1@gmail.com"
 
-          # Determine test and deploy status
-          test_status = "PASSED" if "${{ needs.test.outputs.test-result }}" == "success" else "FAILED"
+          test_status = "PASSED" if "${{ needs.test.outputs.test_result }}" == "success" else "FAILED"
           deploy_status = "SKIPPED"
           if os.path.exists("deploy.log"):
-              deploy_status = "SUCCEEDED" if os.path.getsize("deploy.log") > 0 else "FAILED"
-
-          subject = f"CI Report - ${{ github.repository }}"
+              deploy_status = "DONE"
 
           msg = MIMEMultipart()
-          msg['From'] = sender_email
-          msg['To'] = receiver_email
-          msg['Subject'] = subject
+          msg["From"] = sender
+          msg["To"] = receiver
+          msg["Subject"] = "CI Report – Tests & Deployment"
 
-          body = f"""
-          Hello Houssem,
+          msg.attach(MIMEText(f"""
+          CI Pipeline Finished
 
-          CI Run Summary:
+          Tests: {test_status}
+          Deployment: {deploy_status}
 
-          Repository: ${{ github.repository }}
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
+          The attached HTML contains:
+          - Pytest statistics & environment
+          - Test results
+          - Workflow logs (app, tests, deploy)
+          """, "plain"))
 
-          Test Status: {test_status}
-          Deployment Status: {deploy_status}
+          with open("unified_report.html", "rb") as f:
+              part = MIMEBase("application", "octet-stream")
+              part.set_payload(f.read())
+              encoders.encode_base64(part)
+              part.add_header("Content-Disposition", "attachment; filename=report.html")
+              msg.attach(part)
 
-          The attached cumulative report contains:
-          - Pytest HTML report (environment, summary, results)
-          - Application logs (previous + new runs)
-          - Deployment logs (if available)
+          ctx = ssl.create_default_context()
+          with smtplib.SMTP("smtp.gmail.com", 587) as s:
+              s.starttls(ctx)
+              s.login(sender, password)
+              s.send_message(msg)
 
-          Regards,
-          GitHub Actions 🤖
-          """
-          msg.attach(MIMEText(body, 'plain'))
-
-          # Attach cumulative report
-          if os.path.exists("full_report.html"):
-              filename = "full_report.html"
-              with open(filename, "rb") as attachment:
-                  part = MIMEBase("application", "octet-stream")
-                  part.set_payload(attachment.read())
-                  encoders.encode_base64(part)
-                  part.add_header("Content-Disposition", f"attachment; filename={filename}")
-                  msg.attach(part)
-
-          # Attach deploy.log if exists
-          if os.path.exists("deploy.log"):
-              filename = "deploy.log"
-              with open(filename, "rb") as attachment:
-                  part = MIMEBase("application", "octet-stream")
-                  part.set_payload(attachment.read())
-                  encoders.encode_base64(part)
-                  part.add_header("Content-Disposition", f"attachment; filename={filename}")
-                  msg.attach(part)
-
-          context = ssl.create_default_context()
-          with smtplib.SMTP("smtp.gmail.com", 587) as server:
-              server.starttls(context=context)
-              server.login(sender_email, password)
-              server.sendmail(sender_email, receiver_email, msg.as_string())
-
-          print("Email with cumulative report sent successfully!")
+          print("Email sent")
           EOF
