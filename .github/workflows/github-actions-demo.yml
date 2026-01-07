@@ -41,9 +41,9 @@ jobs:
           secure: false
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "CI Test Report - ${{ github.repository }}"
           to: slimihoussem1@gmail.com
-          from: GitHub Actions
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          subject: "CI Test Report - ${{ github.repository }}"
           body: |
             Hello Houssem,
 
