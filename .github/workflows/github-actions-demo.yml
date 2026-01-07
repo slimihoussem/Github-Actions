@@ -1,4 +1,4 @@
-name: Python CI - Test, Deploy, and Send Report
+name: Python CI - Full Log Test, Deploy, and Email
 
 on:
   push:
@@ -9,59 +9,68 @@ on:
       - "**"
 
 jobs:
-  test-deploy-and-report:
+  test-deploy-report:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repository
+      # Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup Python
+      # Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3️⃣ Install dependencies
+      # Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-html
 
-      # 4️⃣ Run your application
+      # Run application and save logs
       - name: Run application
         run: |
-          python app.py
+          python app.py | tee app.log
 
-      # 5️⃣ Run tests and generate HTML report
+      # Run tests and generate HTML report including all logs
       - name: Run tests and generate report
         id: run_tests
         run: |
           pytest tests/test_example.py \
             --html=report.html \
-            --self-contained-html
+            --self-contained-html \
+            --capture=tee-sys | tee pytest.log
         continue-on-error: true  # allow workflow to continue if tests fail
 
-      # 6️⃣ Upload report as artifact
-      - name: Upload test report as artifact
+      # Combine logs (app + pytest) into one file
+      - name: Combine logs
+        run: |
+          echo "<h2>Application Logs</h2>" > full_report.html
+          cat app.log >> full_report.html
+          echo "<h2>Test Logs</h2>" >> full_report.html
+          cat pytest.log >> full_report.html
+
+      # Upload combined report as artifact
+      - name: Upload full report as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: test-report
-          path: report.html
+          name: full-ci-report
+          path: full_report.html
 
-      # 7️⃣ Deploy application (only if tests passed)
+      # Deploy application (only if tests passed)
       - name: Deploy application
         id: deploy
         run: |
           chmod +x deploy.sh
-          ./deploy.sh
-        if: success()  # run only if tests succeeded
-        continue-on-error: true  # allow workflow to continue even if deploy fails
+          ./deploy.sh | tee deploy.log
+        if: success()
+        continue-on-error: true  # so we can always send email
 
-      # 8️⃣ Send email with test and deployment status
+      # Send email with full report
       - name: Send final email
-        if: always()  # always run, even if previous steps fail
+        if: always()  # always send
         run: |
           python - <<EOF
           import smtplib, ssl
@@ -78,10 +87,10 @@ jobs:
           # Determine status
           test_status = "PASSED" if os.environ.get('GITHUB_JOB') else "FAILED"
           deploy_status = "SKIPPED or FAILED"
-          if os.environ.get('GITHUB_JOB') and os.environ.get('GITHUB_RUN_ATTEMPT'):
-              deploy_status = "SUCCEEDED" if os.environ.get('GITHUB_JOB') else "FAILED"
+          if os.environ.get('GITHUB_JOB') and os.path.exists("deploy.log"):
+              deploy_status = "SUCCEEDED" if os.path.getsize("deploy.log") > 0 else "FAILED"
 
-          subject = f"CI Report - ${{ github.repository }}"
+          subject = f"CI Full Report - ${{ github.repository }}"
 
           msg = MIMEMultipart()
           msg['From'] = sender_email
@@ -100,16 +109,16 @@ jobs:
           Test Status: {test_status}
           Deployment Status: {deploy_status}
 
-          Please find the test report attached if available.
+          Please find the full CI report attached.
 
           Regards,
           GitHub Actions 🤖
           """
           msg.attach(MIMEText(body, 'plain'))
 
-          # Attach report.html if it exists
-          if os.path.exists("report.html"):
-              filename = "report.html"
+          # Attach full report
+          if os.path.exists("full_report.html"):
+              filename = "full_report.html"
               with open(filename, "rb") as attachment:
                   part = MIMEBase("application", "octet-stream")
                   part.set_payload(attachment.read())
@@ -124,5 +133,5 @@ jobs:
               server.login(sender_email, password)
               server.sendmail(sender_email, receiver_email, msg.as_string())
 
-          print("Final email sent successfully!")
+          print("Final email with full logs sent successfully!")
           EOF
