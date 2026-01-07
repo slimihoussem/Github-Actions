@@ -76,6 +76,7 @@ jobs:
             echo "test_result=fail" >> $GITHUB_OUTPUT
           else
             echo "test_result=success" >> $GITHUB_OUTPUT
+          fi
 
   # ==========================
   # 2️⃣ Deploy Job
