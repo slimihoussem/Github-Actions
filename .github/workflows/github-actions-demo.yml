@@ -1,4 +1,4 @@
-name: Python CI - Generate Test Report and Send Email
+name: Python CI - Test and Send Email
 
 on:
   push:
@@ -36,4 +36,27 @@ jobs:
             --html=report.html \
             --self-contained-html
 
-     
+      - name: Send email with report
+        uses: marketplace-actions/send-mail@v1
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CI Test Report - ${{ github.repository }}"
+          body: |
+            Hello Houssem,
+
+            The automated tests have finished.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+
+            Please find the test report attached.
+
+            Regards,
+            GitHub Actions 🤖
+          to: slimihoussem1@gmail.com
+          from: ${{ secrets.EMAIL_USERNAME }}
+          attachments: report.html
