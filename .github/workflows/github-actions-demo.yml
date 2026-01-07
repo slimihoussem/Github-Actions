@@ -1,22 +1,17 @@
-name: Python CI - Generate and Commit Test Report
+name: Python CI - Generate Test Report and Send Email
 
 on:
   push:
     branches:
       - "**"
 
-permissions:
-  contents: write   # allow GitHub Actions to push to repo
-
 jobs:
-  test-and-commit-report:
+  test-and-email-report:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # REQUIRED for pull --rebase
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,3 +33,28 @@ jobs:
             --html=report.html \
             --self-contained-html
 
+      - name: Send email with test report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          secure: false
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "CI Test Report - ${{ github.repository }}"
+          to: slimihoussem1@gmail.com
+          from: GitHub Actions
+          body: |
+            Hello Houssem,
+
+            The automated tests have finished.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+
+            Please find the test report attached.
+
+            Regards,
+            GitHub Actions 🤖
+          attachments: report.html
