@@ -1,12 +1,15 @@
-name: Python CI with Email Report
+name: Python CI - Generate Report
 
 on:
   push:
     branches:
-      - "**"   # run on every push to any branch
+      - "**"
+
+permissions:
+  contents: write   # REQUIRED to commit files
 
 jobs:
-  test-and-email:
+  test-and-commit-report:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,30 +32,21 @@ jobs:
 
       - name: Run tests and generate report
         run: |
-          pytest tests/test_example.py --html=report.html --self-contained-html
+          pytest tests/test_example.py \
+            --html=report.html \
+            --self-contained-html
 
-      - name: Send email report
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          secure: false
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "GitHub Actions Test Report - ${{ github.repository }}"
-          body: |
-            Hello,
+      - name: Commit test report to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            The automated tests have completed successfully.
+          git add report.html
 
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-
-            Please find the test report attached.
-
-            Regards,
-            GitHub Actions 🤖
-          to: slimihoussem1@gmail.com
-          from: GitHub Actions
-          attachments: report.html
+          # Commit only if report changed
+          if ! git diff --cached --quiet; then
+            git commit -m "CI: update test report [skip ci]"
+            git push
+          else
+            echo "No changes in report"
+          fi
