@@ -126,19 +126,24 @@ jobs:
           password = "${{ secrets.EMAIL_PASSWORD }}"
 
           to_email = "slimihoussem1@gmail.com"
-          cc_email = "chokri.gammoudi@gmail.com"   
+          cc_email = "manager@example.com"   # 🔴 CHANGE THIS
           recipients = [to_email, cc_email]
 
           repo = "${{ github.repository }}"
           test_status = "${{ needs.test.outputs.test_result }}"
           deploy_status = "DONE" if test_status == "success" else "SKIPPED"
 
-          # Create message
+          commit_sha = "${{ github.sha }}"[:7]
+          commit_message = """${{ github.event.head_commit.message }}"""
+          commit_author = "${{ github.event.head_commit.author.name }}"
+          branch = "${{ github.ref_name }}"
+
+          # Email
           msg = MIMEMultipart()
           msg["From"] = sender
           msg["To"] = to_email
           msg["Cc"] = cc_email
-          msg["Subject"] = f"[CI {test_status.upper()}] {repo}"
+          msg["Subject"] = f"[CI {test_status.upper()}] {repo} ({branch})"
 
           body = f"""
           Hello,
@@ -146,10 +151,16 @@ jobs:
           CI pipeline has finished.
 
           Repository : {repo}
-          Tests       : {test_status.upper()}
-          Deployment  : {deploy_status}
+          Branch     : {branch}
 
-          Please find the unified test report attached.
+          Commit     : {commit_sha}
+          Author     : {commit_author}
+          Message    : {commit_message}
+
+          Tests      : {test_status.upper()}
+          Deployment : {deploy_status}
+
+          Please find the unified report attached.
 
           Regards,
           GitHub Actions 🤖
@@ -168,7 +179,7 @@ jobs:
               )
               msg.attach(part)
 
-          # Send email
+          # Send
           with smtplib.SMTP("smtp.gmail.com", 587) as server:
               server.starttls()
               server.login(sender, password)
