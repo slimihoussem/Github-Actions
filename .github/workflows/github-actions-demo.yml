@@ -126,7 +126,7 @@ jobs:
           password = "${{ secrets.EMAIL_PASSWORD }}"
 
           to_email = "slimihoussem1@gmail.com"
-          cc_email = "manager@example.com"   # 🔴 CHANGE THIS
+          cc_email = "chokri.gammoudi@gmail.com"   
           recipients = [to_email, cc_email]
 
           repo = "${{ github.repository }}"
