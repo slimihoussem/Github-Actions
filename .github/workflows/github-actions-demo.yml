@@ -1,4 +1,4 @@
-name: CI Tests + Deploy + Report
+name: CI Tests + Deploy + Unified Report
 
 on:
   push:
@@ -6,13 +6,14 @@ on:
   pull_request:
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
+
     outputs:
       test_result: ${{ steps.test_status.outputs.result }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -25,85 +26,104 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-html pytest-metadata
 
+      # -----------------------------
+      # Application logs
+      # -----------------------------
       - name: Run application (capture logs)
         run: |
           python app.py > app.log 2>&1 || true
 
-      - name: Run tests (capture logs)
+      # -----------------------------
+      # Tests + pytest-html report
+      # -----------------------------
+      - name: Run tests and generate report
         run: |
           pytest tests \
-            --html=pytest_report.html \
+            --html=report.html \
             --self-contained-html \
             --capture=tee-sys \
-            | tee pytest.log
+            --log-cli-level=INFO \
+            > pytest_session.log 2>&1
         continue-on-error: true
 
+      # -----------------------------
+      # Determine test status
+      # -----------------------------
       - name: Determine test status
         id: test_status
         run: |
-          if grep -q "FAILED" pytest.log; then
+          if grep -q "FAILED" pytest_session.log; then
             echo "result=failure" >> $GITHUB_OUTPUT
           else
             echo "result=success" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate unified report
-        run: |
-          cat <<EOF > unified_report.html
-          <html>
-          <head><title>CI Unified Report</title></head>
-          <body>
-          <h1>CI Report</h1>
-
-          <h2>Test Summary</h2>
-          <p>Status: <b>${{ steps.test_status.outputs.result }}</b></p>
-
-          <h2>Pytest HTML Report</h2>
-          <iframe src="pytest_report.html" width="100%" height="600"></iframe>
-
-          <h2>Application Logs</h2>
-          <pre>$(cat app.log)</pre>
-
-          <h2>Pytest Logs</h2>
-          <pre>$(cat pytest.log)</pre>
-
-          </body>
-          </html>
-          EOF
-
-      - name: Upload unified report artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unified-report
-          path: |
-            unified_report.html
-            pytest_report.html
-            app.log
-            pytest.log
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: needs.test.outputs.test_result == 'success'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      # -----------------------------
+      # Deploy only if tests pass
+      # -----------------------------
       - name: Deploy
+        if: steps.test_status.outputs.result == 'success'
         run: |
           chmod +x deploy.sh
           ./deploy.sh | tee deploy.log
 
-      - name: Upload deploy logs
+      # -----------------------------
+      # Append logs to SAME report.html
+      # -----------------------------
+      - name: Append logs to report.html
+        if: always()
+        run: |
+          cat <<'EOF' >> report.html
+
+          <hr>
+          <h2>Previous Logs</h2>
+          <pre>No previous logs available</pre>
+
+          <h2>New Application Logs</h2>
+          <pre>
+          EOF
+
+          sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' app.log >> report.html
+
+          cat <<'EOF' >> report.html
+          </pre>
+
+          <h2>New Test Logs</h2>
+          <pre>
+          EOF
+
+          sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' pytest_session.log >> report.html
+
+          cat <<'EOF' >> report.html
+          </pre>
+
+          <h2>Deployment Logs</h2>
+          <pre>
+          EOF
+
+          if [ -f deploy.log ]; then
+            sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' deploy.log >> report.html
+          else
+            echo "Deployment skipped." >> report.html
+          fi
+
+          echo "</pre>" >> report.html
+
+      # -----------------------------
+      # Upload unified report
+      # -----------------------------
+      - name: Upload unified report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: deploy-logs
-          path: deploy.log
+          name: unified-report
+          path: report.html
 
+  # =============================
+  # EMAIL NOTIFICATION (FINAL)
+  # =============================
   notify:
-    needs: [test, deploy]
+    needs: ci
     runs-on: ubuntu-latest
     if: always()
 
@@ -113,7 +133,7 @@ jobs:
         with:
           name: unified-report
 
-      - name: Send email
+      - name: Send email with report
         run: |
           python - <<EOF
           import smtplib
@@ -130,37 +150,34 @@ jobs:
           recipients = [to_email, cc_email]
 
           repo = "${{ github.repository }}"
-          test_status = "${{ needs.test.outputs.test_result }}"
-          deploy_status = "DONE" if test_status == "success" else "SKIPPED"
+          branch = "${{ github.ref_name }}"
+          status = "${{ needs.ci.outputs.test_result }}"
 
           commit_sha = "${{ github.sha }}"[:7]
-          commit_message = """${{ github.event.head_commit.message }}"""
+          commit_msg = """${{ github.event.head_commit.message }}"""
           commit_author = "${{ github.event.head_commit.author.name }}"
-          branch = "${{ github.ref_name }}"
 
-          # Email
           msg = MIMEMultipart()
           msg["From"] = sender
           msg["To"] = to_email
           msg["Cc"] = cc_email
-          msg["Subject"] = f"[CI {test_status.upper()}] {repo} ({branch})"
+          msg["Subject"] = f"[CI {status.upper()}] {repo} ({branch})"
 
           body = f"""
           Hello,
 
-          CI pipeline has finished.
+          CI pipeline finished.
 
           Repository : {repo}
           Branch     : {branch}
 
           Commit     : {commit_sha}
           Author     : {commit_author}
-          Message    : {commit_message}
+          Message    : {commit_msg}
 
-          Tests      : {test_status.upper()}
-          Deployment : {deploy_status}
+          Tests      : {status.upper()}
 
-          Please find the unified report attached.
+          Please find the detailed report attached.
 
           Regards,
           GitHub Actions 🤖
@@ -168,18 +185,16 @@ jobs:
 
           msg.attach(MIMEText(body, "plain"))
 
-          # Attach report
-          with open("unified_report.html", "rb") as f:
+          with open("report.html", "rb") as f:
               part = MIMEBase("application", "octet-stream")
               part.set_payload(f.read())
               encoders.encode_base64(part)
               part.add_header(
                   "Content-Disposition",
-                  "attachment; filename=unified_report.html"
+                  "attachment; filename=report.html"
               )
               msg.attach(part)
 
-          # Send
           with smtplib.SMTP("smtp.gmail.com", 587) as server:
               server.starttls()
               server.login(sender, password)
